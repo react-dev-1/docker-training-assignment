@@ -49,3 +49,96 @@ COPY . .                # code changes often, so only this step reruns
 If `COPY . .` came before `npm install`, everytime code changes it would reinstall all the dependencies.
 
 ---
+
+## Part 2: Docker CLI basics
+
+### Container commands
+| Command | What it does |
+|---|---|
+| `docker run -d --name dockerTest nginx` | Creates and starts a container (`-d` runs the command in the background) |
+| `docker ps` | Lists the running containers | 
+| `docker ps -a` | Lists all containers, including stopped instances |
+| `docker stop dockerTest` | Stops a running container |
+| `docker start dockerTest` | Starts a stopped container |
+| `docker rm dockerTest` | Deletes a stopped container|
+| `docker rm -f dockerTest` | Deletes a running container by force |
+| `docker logs -f dockerTest` | Shows the container's output (`-f` keeps following it) |
+| `docker exec -it dockerTest sh` | Opens an interactive shell inside a running container |
+
+![alt text](assets/images/image.png)
+![alt text](assets/images/image-1.png)
+
+### Images and cleanup
+| Command | What it does |
+|---|---|
+| `docker images` | Lists the local images |
+| `docker pull postgres:17` | Downloads an image |
+| `docker rmi postgres:17` | Deletes an image (fails if a container is still using it) |
+| `docker system prune` | Deletes unused containers, images, networks, and build cache |
+
+![alt text](assets/images/image-2.png)
+![alt text](assets/images/image-4.png)
+
+**Beware when using `system prune`**, as it deletes stopped containers, unused networks, untagged images, and build cache by default. **`system prune -a`** removes all images not used by any container, while **`system prune --volumes`** removes unused volumes, which means losing data.
+
+### Ports, env vars and storage (volume)
+- **`-p 8080:80`** - maps a host port to a container port (`host:container`). Eg:- `localhost:8080`.
+- **`-e KEY=value`** - sets an environment variable. 
+- **`--env-file .env`** - loads all environment variables from a file.
+- **Bind mount** (`-v ./src:/app/src`) - maps a host folder into the container. 
+- **Named volume** (`-v pgVol:/var/lib/postgresql/data`) - storage that Docker manages. Best for database data.
+
+```powershell
+# Port mapping -> host:container
+docker run -d --name testPort -p 8080:8080 nginx:alpine # Creates and starts a new container with a given name
+# OR
+docker run -p 8080:80 nginx:alpine  # Creates and starts a new container with a random name 
+curl http://localhost:8080
+
+# Inline Environment variables 
+docker run -e ENV=key alpine:latest 
+
+# Environment variables from a file
+echo "ENV=key" > .env
+docker run --env-file .env alpine:latest 
+
+# Bind mount
+mkdir hostdir && echo "host file" > hostdir/file.txt
+docker run --mount type=bind,src="${PWD}/hostdir",dst=//data alpine:latest cat //data/file.txt
+# OR
+docker run -v "${PWD}/hostdir:/data" alpine:latest cat /data/file.txt
+
+# Named volume
+docker volume create testvol
+docker volume ls
+docker run --mount type=volume,src=testvol,dst=//data alpine:latest
+# OR
+docker run -v testvol:/data alpine:latest
+```
+
+![alt text](assets/images/image-3.png)
+![alt text](assets/images/image-5.png)
+![alt text](assets/images/image-9.png)
+![alt text](assets/images/image-6.png)
+![alt text](assets/images/image-7.png)
+
+### Exercise:- Data remains after removing the container
+```powershell
+# Postgres container with a named volume
+docker run -d --name dockerTestpg -e POSTGRES_PASSWORD=pass -v pgVol:/var/lib/postgresql/data postgres:17  
+
+# Create table with a row
+docker exec -it dockerTestpg psql -U postgres -c "CREATE TABLE test (name text); INSERT INTO test VALUES ('John Doe');" 
+docker stop dockerTestpg
+docker rm dockerTestpg
+
+# New container, but same volume
+docker run -d --name pgTest -e POSTGRES_PASSWORD=pass -v pgVol:/var/lib/postgresql/data postgres:17
+docker exec -it pgTest psql -U postgres -c "SELECT * FROM test;"   # returns 'John Doe'
+```
+
+![alt text](assets/images/image-8.png)
+
+Even though the container was deleted, the data lived in the volume, therefore the new container display the existing data.
+
+---
