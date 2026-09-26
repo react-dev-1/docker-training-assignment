@@ -11,9 +11,6 @@ A **virtual machine** mimics a computer and runs/ships a full guest operating sy
 | | Container | Virtual machine |
 |---|---|---|
 | OS | Shares the host's kernel | Has its own full guest OS |
-| Size | Usually megabytes | Usually gigabytes |
-| Start time | Seconds or less | Minutes |
-| Isolation | Process-level (lighter) | Hardware-level (stronger) |
 | What it virtualises| Operating system | Hardware |
 
 ### Image vs container vs volume vs network
@@ -85,8 +82,8 @@ If `COPY . .` came before `npm install`, everytime code changes it would reinsta
 - **`-p 8080:80`** - maps a host port to a container port (`host:container`). Eg:- `localhost:8080`.
 - **`-e KEY=value`** - sets an environment variable. 
 - **`--env-file .env`** - loads all environment variables from a file.
-- **Bind mount** (`-v ./src:/app/src`) - maps a host folder into the container. 
-- **Named volume** (`-v pgVol:/var/lib/postgresql/data`) - storage that Docker manages. Best for database data.
+- **Bind mount** - maps a host folder into the container. 
+- **Named volume** - storage that Docker manages. Best for database data.
 
 ```powershell
 # Port mapping -> host:container
@@ -224,3 +221,77 @@ The single-stage image (docker_example) size is 411MB, while the multi-stage ima
 
 ---
 
+## Part 4: Docker Compose
+
+Docker compose defines and runs multi-container applications in a file called `docker-compose.yml`. It basically instructs the containers how to work together to create the full application. 
+- **`backend`** - is the app service built from the Dockerfile, which is published on port 9001.
+- **`db`** - `postgres:17`, with data stored in the `postgres_data` named volume.
+- **`depends_on: db`** - starts the `db` before `backend`. 
+- **Service networking** - both the services (backend and db) are on `app-network`, so the app connects with host name `db` (`postgres://user:pass@db:5432/testdb`). 
+- **`.env`** - Compose reads the `.env` automatically and the `env_file` passes it into the container. 
+
+### The project's `docker-compose.yml`
+
+```yaml
+services:
+  # Node.js application service
+  backend:
+    build:
+      # Build context for Docker
+      context: .
+      # Builds the app with the Dockerfile
+      dockerfile: Dockerfile
+    ports:
+      # Maps port host:container
+      - '9001:9000'
+    environment:
+      # Compose fetches values from the .env file
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      # Starts the database service before starting the backend
+      - db
+    networks:
+      # Places both services on the same network
+      - app-network
+
+  # PostgreSQL database service
+  db:
+    image: postgres:17
+    # Sets up the initial database using environment variables from the .env file
+    env_file:
+      - .env
+    volumes:
+      # Keeps database files in a named volume across container
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+volumes:
+  # Docker-managed storage for PostgreSQL data
+  postgres_data:
+
+networks:
+  # Shared network that allows the backend connect to the database by the service name
+  app-network:
+```
+
+### Docker Compose Commands
+| Command | What it does |
+|---|---|
+| `docker compose up -d` | Builds creates and starts containers for a service in the background |
+| `docker compose build` | Rebuilds the images after changing the code or Dockerfile |
+| `docker compose ps` | Shows the status of the containers |
+| `docker compose logs -f backend` | Follows one service log outputs |
+| `docker compose exec db psql -U user testdb` | Runs a command within a running service |
+| `docker compose down` | Stops and removes the containers and network but **keeps the volumes** |
+| `docker compose down -v` | Same as `docker compose down`, but **deletes the volumes** |
+
+![alt text](assets/images/image-12.png)
+![alt text](assets/images/image-13.png)
+![alt text](assets/images/image-14.png)
+![alt text](assets/images/image-15.png)
+
+### Why `down -v` is dangerous on a shared or real data setup?
+`down -v` command deletes the named volumes, which means the whole Postgres database would be deleted, such that on a shared or a real data setup where others depend on that data would not be able to access it again. Best preferred to take a backup, before using the command locally for a clean reset.
+
+---
