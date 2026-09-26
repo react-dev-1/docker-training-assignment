@@ -142,3 +142,85 @@ docker exec -it pgTest psql -U postgres -c "SELECT * FROM test;"   # returns 'Jo
 Even though the container was deleted, the data lived in the volume, therefore the new container display the existing data.
 
 ---
+
+## Part 3: Writing a Dockerfile
+
+### The project's Dockerfile
+```dockerfile
+# Uses node version 22 as the base image
+FROM node:22
+
+# Goes to the app directory (like a cd terminal command)
+WORKDIR /app
+
+# Copy the dependencies first for caching (if available)
+COPY package*.json ./
+
+# Install app dependencies (runs at build time and creates a layer)
+RUN npm install
+
+# Copy the rest of the app into the container
+COPY . .
+
+# Set port environment variable
+ENV PORT=9000
+
+# Expose the port so the computer can access it
+EXPOSE 9000
+
+# Run the app
+CMD ["npm", "start"]
+```
+
+```powershell
+# To build the image
+docker build -t docker_example .  #t is for tag and . is the path
+
+# To run the container
+docker run -p 9000:9000 docker_example  # p is port forwarding
+```
+![alt text](assets/images/image-10.png)
+
+### CMD vs ENTRYPOINT
+- **`RUN`** command runs while the image is being **built** while **`CMD`** and **`ENTRYPOINT`** run when a container **starts**.
+- **`CMD`** is the default command, and it's easy to override. For example, running `docker run docker-example` uses the image's default CMD, but `docker run docker-example sh` replaces it with sh.
+- **`ENTRYPOINT`** is the fixed executable, and anything that is passed to `docker run` becomes its arguments.
+- Both CMD and ENTRYPOINT are often used together, with ENTRYPOINT as the program and CMD as its default arguments:
+  ```dockerfile  
+  ENTRYPOINT ["node"]
+  CMD ["server.js"]  
+  ```
+
+### .dockerignore
+This file includes a list of files to exclude out of the build context (similar to a .gitignore file). This allows to build faster, keeps images smaller and keeps secrets out of the image.
+
+### Multi-stage builds
+
+```dockerfile
+FROM node:22 AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+FROM node:22-alpine AS runtime
+ENV PORT=9000
+WORKDIR /app
+COPY --from=build /app .
+EXPOSE 9000
+CMD ["npm", "start"]
+```
+
+```powershell
+# To build the multistage image
+docker build -f Dockerfile.multistage -t docker-test .
+```
+
+The following image shows the the sizes of the docker images;
+
+![alt text](assets/images/image-11.png)
+
+The single-stage image (docker_example) size is 411MB, while the multi-stage image (docker-test) is 62.3MB.
+
+---
+
