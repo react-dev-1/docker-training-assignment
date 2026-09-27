@@ -439,4 +439,39 @@ networks:
 
 ![alt text](assets/images/image-26.png)
 
+---
+## Part 6: Debugging and good practice
 
+### Debugging Commands
+- **`docker logs -f <container>`** - displays error logs.
+```powershell
+docker logs pgTest
+docker logs -f pgTest
+docker compose logs -f pgTest
+```
+- **`docker inspect <container>`** - provides full details of the container in the JSON format, including env vars, mounts, IP address, network and so on. 
+```powershell
+docker inspect pgTest
+```
+- **`docker exec -it <container> sh`** - opens an interactive a shell inside the container.
+```powershell
+docker exec -it pgTest sh
+```
+- **`docker ps -a`** - lists all the containers (both running and stopped), and their relevant ports.
+```powershell
+docker ps -a
+```
+
+### Common issues faced
+| Problem | Cause | Fix |
+|---|---|---|
+| **Port already in use** | Another container/process is using the host port | Run `docker ps` and locate the container using that port, stop the process or change the host port (such as `9001:9000`) in the `docker-compose.yml` file |
+| **Container exits immediately** | The main process while building the image crashes when there are a missing env variables, missing imports or a code error | Check the error using `docker logs` and `docker ps -a` for the relevant container status |
+| **Stale image or cache** | When the code or configs are change, the old image is still running since the image wasn't rebuilt | Run `docker compose up -d --build`, or `docker compose build --no-cache` to rebuild the image |
+
+### Keeping secrets safe
+- Never place secrets (those from .env file) directly in the Dockerfile. Anyone who pulls the image can read them through `docker inspect`.
+- Use `-e`, `--env-file` or `env_file:` to pass secrets into the container when it runs.
+- Add `.env` file to `.dockerignore` and `.gitignore`, so that it stays out of the image and git.
+- Use a `.env.example` file with the relevant variable, so that the others know what to set.
+---
