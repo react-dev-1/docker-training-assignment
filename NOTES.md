@@ -11,13 +11,15 @@ A **virtual machine** mimics a computer and runs/ships a full guest operating sy
 | | Container | Virtual machine |
 |---|---|---|
 | OS | Shares the host's kernel | Has its own full guest OS |
-| What it virtualises| Operating system | Hardware |
+| What it virtualises | Operating system | Hardware |
 
 ### Image vs container vs volume vs network
-- **Image** - a standardized package/template that includes all of the app files, libraries, and configurations to run a container, built from a Dockerfile. Images cannot be modified once they are created but changes can be added on top of it or a new image can be created.
-- **Container** - a instance of an image, like an object created from a class. Multiple container instances can be run from one image.
-- **Volume** - Volumes are data stores for containers, that are created and managed by Docker and are isolated from the core functionality of the host machine. When a volume is created, it's stored within a directory on the Docker host and this directory is what's mounted into the container. When the container is removed its own filesystem is also removed, but volume data stays, therefore databases need volumes.
-- **Network** - Compose automatically creates a default network per project. It allows containers to connect to and communicate with each other, as well as with non-Docker network services using the container port. Services/containers on the same network can reach each other by name (for example, `backend` connects to `db:5432`).
+| Term | Description | 
+|---|---|
+| **Image** | A standardized package/template that includes all of the app files, libraries, and configurations to run a container, built from a Dockerfile.<br/> Images cannot be modified once they are created but changes can be added on top of it or a new image can be created. |
+| **Container** | An instance of an image, like an object created from a class. Multiple container instances can be run from one image. |
+| **Volume** | Volumes are data stores for containers, that are created and managed by Docker and are isolated from the core functionality of the host machine.<br/> When a volume is created, it's stored within a directory on the Docker host and this directory is what's mounted into the container.<br/> When the container is removed its own filesystem is also removed, but volume data stays, therefore databases need volumes. |
+| **Network** | Compose automatically creates a default network per project. It allows containers to connect to and communicate with each other, as well as with non-Docker network services using the container port.<br/> Services/containers on the same network can reach each other by name (for example, `backend` connects to `db:5432`). |
 
 ### Registry
 A **registry** is a server that stores and manages Docker images. It contains repositories where one or more container images are stored. Images are shared across teams through these registries, which allows teams to have the same configurations for all stages of CI/CD and deployments.
@@ -131,7 +133,7 @@ docker rm dockerTestpg
 
 # New container, but same volume
 docker run -d --name pgTest -e POSTGRES_PASSWORD=pass -v pgVol:/var/lib/postgresql/data postgres:17
-docker exec -it pgTest psql -U postgres -c "SELECT * FROM test;"   # returns 'John Doe'
+docker exec -it pgTest psql -U postgres -c "SELECT * FROM test;"  
 ```
 
 ![alt text](assets/images/image-8.png)
@@ -295,3 +297,146 @@ networks:
 `down -v` command deletes the named volumes, which means the whole Postgres database would be deleted, such that on a shared or a real data setup where others depend on that data would not be able to access it again. Best preferred to take a backup, before using the command locally for a clean reset.
 
 ---
+## Part 5: Sample Project
+
+Since the Data scraping app uses Python instead of Node.js, the app's Dockerfile is written for Python.
+
+### The project's Dockerfile
+```dockerfile
+# Uses python version 3.12-slim as the base image
+FROM python:3.12-slim AS builder
+
+# Goes to the app directory 
+WORKDIR /app
+
+# Creates a virtual python environment
+RUN python3 -m venv /venv
+# Sets an environment variable
+ENV PATH="/venv/bin:$PATH"
+
+# Download dependencies
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=bind,source=requirements.txt,target=requirements.txt \
+    pip install -r requirements.txt
+
+# Use python version 3.12-slim as the runtime image
+FROM python:3.12
+
+WORKDIR /app
+
+# Copies the virtual python environment in the previous stage
+COPY --from=builder /venv /venv
+ENV PATH="/venv/bin:$PATH"
+
+# Copies only scrape_aluminium.py script into the container
+COPY scrape_aluminium.py ./
+
+# Create a directory to store the outputs
+RUN mkdir -p /app/output
+
+# Runs the application
+CMD ["/venv/bin/python3", "scrape_aluminium.py"]
+```
+
+```powershell
+# To build the image
+docker build -t data_scraper .  #t is for tag and . is the path
+
+# To run the container
+docker run -p 9000:9000 data_scraper  # p is port forwarding
+```
+
+### The project's `docker-compose.yml` file
+
+```yaml
+services:
+  # Python application service
+  backend:
+    build:
+      # Build context for Docker
+      context: .
+      # Builds the app with the multi-stage Dockerfile
+      dockerfile: Dockerfile
+    ports:
+      # Maps port host:container
+      - '9001:9000'
+    environment:
+      # Compose fetches values from the .env file
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      # Starts the database service before starting the backend
+      - db
+    networks:
+      # Places both services on the same network
+      - app-network
+
+  # PostgreSQL database service
+  db:
+    image: postgres:17
+    # Sets up the initial database using environment variables from the .env file
+    env_file:
+      - .env
+    volumes:
+      # Keeps database files in a named volume across container
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+volumes:
+  # Docker-managed storage for PostgreSQL data
+  postgres_data:
+
+networks:
+  # Shared network that allows the backend connect to the database by the service name
+  app-network:
+```
+
+### What I have broke on purpose
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| Ran `docker compose up -d` instead of the initial build command `docker build -t data_scraper .` | Compose built the image using `docker compose up -d` | The terminal output showed the build logs` | No fix was made since the initial build has already been made |
+
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| Port clash (another process already running on the port) | "port is already allocated" error message appears when starting | Checked all the running containers and their ports using `docker ps -a`  | stopped the running container using that port, then ran `docker compose build` |
+
+![alt text](assets/images/image-16.png)
+
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| Missing psycopg import | The build faild since the psycopg package was not installed in the container | Checked the error logs using `docker compose logs -f backend` and figure out that the Python could not import psycopg  | Added psycopg2>=3.3.5 to requirements.txt, then rebuilt the image with `docker compose build`  |
+
+![alt text](assets/images/image-17.png)
+
+![alt text](assets/images/image-18.png)
+
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| Incompatible Python version | The build failed because the psycopg2>=3.3.5 version was incompatible. | Checked the error from `docker compose build` | Replaced the version to psycopg[binary]>=3.1 and ran a build |
+
+![alt text](assets/images/image-19.png)
+
+![alt text](assets/images/image-20.png)
+
+![alt text](assets/images/image-21.png)
+
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| No DB password in `.env` | Error since the DB password is a required variable | `docker compose up -d` and `docker compose logs -f backend` gave the same error message | Added the value, then `docker compose up -d` |
+
+![alt text](assets/images/image-22.png)
+
+| What I broke | What happened | How I figured it | Fix |
+|---|---|---|---|
+| Removed the DB volume | The volume and the data was removed , but when rebuilding the **init.sql** creates a new table and inserts data into it.| Checked the available volumes `docker volume ls`, removed the specific voulme using `docker volume rm data-scraping-task_postgres_data` and then `docker compose exec db psql -U user mydb` shows tables with data | The **init.sql** creates a new table and inserts data into it, during build time. |
+
+![alt text](assets/images/image-23.png)
+![alt text](assets/images/image-24.png)
+
+### Successful build images
+
+![alt text](assets/images/image-25.png)
+
+![alt text](assets/images/image-26.png)
+
+
