@@ -1,0 +1,43 @@
+services:
+  # Python application service
+  backend:
+    build:
+      # Build context for Docker
+      context: .
+      # Builds the app with the multi-stage Dockerfile
+      dockerfile: Dockerfile
+    ports:
+      # Maps port host:container
+      - '9000:9000'
+    environment:
+      # Compose fetches values from the .env file
+      # DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB}"
+    depends_on:
+      # Starts the database service before starting the backend
+      - db
+    networks:
+      # Places both services on the same network
+      - app-network
+
+  # PostgreSQL database service
+  db:
+    image: postgres:17
+    # Sets up the initial database using environment variables from the .env file
+    env_file:
+      - .env
+    volumes:
+      # Keeps database files in a named volume across container
+      - postgres_data:/var/lib/postgresql/data
+      # Initializes the database with the SQL script
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - app-network
+
+volumes:
+  # Docker-managed storage for PostgreSQL data
+  postgres_data:
+
+networks:
+  # Shared network that allows the backend connect to the database by the service name
+  app-network:
